@@ -1,0 +1,48 @@
+stages:
+  - build
+  - deploy
+variables:
+  GIT_SUBMODULE_STRATEGY: normal
+  REGISTRY_GROUP_PROJECT: reg.vntrip.vn/frontend
+  IMAGE_URL: $REGISTRY_GROUP_PROJECT-$CI_COMMIT_REF_NAME/$CI_PROJECT_NAME:$CI_COMMIT_SHORT_SHA
+
+build-job:
+    stage: build
+    script:
+    - docker build --tag $IMAGE_URL .
+    - docker login -u $CI_JOB_USER -p $CI_JOB_TOKEN $REGISTRY_GROUP_PROJECT
+    - echo "${IMAGE_URL}"
+    - docker push "${IMAGE_URL}"
+    - docker rmi -f $IMAGE_URL
+    only:
+      - master
+    tags:
+    - shell
+
+
+deploy-job:
+  image:
+    name: $KUBE_TOOLS_GIT
+    entrypoint: ["/bin/bash", "-c"]
+  stage: deploy
+  variables:
+    GIT_STRATEGY: normal
+    GIT_SUBMODULE_STRATEGY: none
+  before_script:
+    - export KUBECONFIG=$KUBECONFIG
+    - export NAMESPACE=vntrip-prod
+    - kubectl version
+  script:
+    - sed -i "s|_IMAGE_URL_|${IMAGE_URL}|g" deploy.yaml
+    - sed -i "s|_NAMESPACE_|${NAMESPACE}|g" deploy.yaml
+    - yq e -C deploy.yaml
+    - kubectl apply -f deploy.yaml 
+    - kubectl rollout status -f deploy.yaml
+    - kubectl get all -l app=fe-${CI_PROJECT_NAME} -n ${NAMESPACE}
+  only:
+    - master
+  tags:
+    - docker
+  # when: manual
+
+
